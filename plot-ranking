@@ -1,0 +1,234 @@
+#!/usr/bin/env python
+# python imports
+import pickle
+import os
+import logging
+from fnmatch import fnmatch
+
+# ROOT/rootpy imports
+from rootpy.plotting import Canvas, Pad, Legend, Graph, Hist, get_style, set_style
+from rootpy.plotting.utils import draw, tick_length_pixels
+from rootpy.plotting.style.atlas.labels import ATLAS_label
+from rootpy.utils.path import mkdir_p
+from rootpy import ROOT
+from ROOT import TLine, TGaxis, TLatex
+
+# local imports
+from hhstat.plotting import get_data, print_np
+log = logging.getLogger(os.path.basename(__file__))
+
+# set the style
+style = get_style('ATLAS', shape='square')
+style.SetPadLeftMargin(0.09)
+style.SetPadBottomMargin(0.4)
+style.SetPadRightMargin(0.03)
+style.SetTitleYOffset(0.8)
+style.SetHatchesLineWidth(2)
+style.SetHatchesSpacing(0.5)
+# remove ticks on top X axis
+style.SetPadTickX(0)
+set_style(style)
+
+# guide lines
+line = TLine()
+line.SetLineStyle(7)
+line.SetLineWidth(2)
+solid_line = TLine()
+solid_line.SetLineWidth(1)
+
+if not os.getenv('MVA_NO_BATCH', False):
+    ROOT.gROOT.SetBatch(True)
+
+
+def matched(name, patterns):
+    if not patterns:
+        return True
+    name = name.lower()
+    for pattern in patterns:
+        if fnmatch(name, pattern.lower()):
+            return True
+    return False 
+
+
+def plot_ranking(name, file, outdir,
+                 patterns=None, top=None,
+                 row_pixels=30,
+                 label_pixels=None):
+    if label_pixels is None:
+        label_pixels = min(20, int(row_pixels * 0.6))
+    # make the ranking plot
+    data = get_data(file)
+    # rank by postfit impact on mu
+    ranking = []
+    for np, info in data.items():
+        if not matched(np, patterns):
+            continue
+        prefit_low, prefit_nom, prefit_high = info['poi_prefit']
+        if prefit_low > prefit_high:
+            prefit_low, prefit_high = prefit_high, prefit_low
+        prefit_low = min(prefit_nom, prefit_low)
+        prefit_high = max(prefit_nom, prefit_high)
+        postfit_low, postfit_nom, postfit_high = info['poi_postfit']
+        if postfit_low > postfit_high:
+            postfit_low, postfit_high = postfit_high, postfit_low
+        postfit_low = min(postfit_nom, postfit_low)
+        postfit_high = max(postfit_nom, postfit_high)
+        prefit_impact_low = (prefit_nom - prefit_low) / prefit_nom
+        prefit_impact_high = (prefit_high - prefit_nom) / prefit_nom
+        postfit_impact_low = (postfit_nom - postfit_low) / postfit_nom
+        postfit_impact_high = (postfit_high - postfit_nom) / postfit_nom
+        # for ranking use full width of postfit impact
+        postfit_impact = (
+            max(postfit_high, postfit_low, postfit_nom) -
+            min(postfit_high, postfit_low, postfit_nom)) / postfit_nom
+        ranking.append(
+            (np, postfit_impact,
+                (prefit_impact_low, prefit_impact_high),
+                (postfit_impact_low, postfit_impact_high)))
+    # sort by postfit impact
+    ranking.sort(key=lambda item: abs(item[1]))
+    if top:
+        # only show the N top ranked NPs
+        ranking = ranking[-top:]
+    n_points = len(ranking)
+    # setup canvas
+    c = Canvas(width=1024, height=300 + (row_pixels + 2) * n_points)
+    c.margin = (0, 0, 0, 0)
+    pad1 = Pad(0, 0, 1, 1)
+    left_pixels = 0.3 * c.width
+    right_pixels = 0.05 * c.width
+    pad1.margin_pixels = (left_pixels, right_pixels, 150, 150)
+    pad1.Draw()
+    # inset for NormFactors
+    #pad2 = Pad(0.63, 0.1, 0.94, 0.22, 0)
+    xaxis, yaxis = pad1.axes(xlimits=(-2, 2), ylimits=(-0.5 - 1, n_points + 1 - 0.5))
+    xaxis.title = '(#theta_{fit} - #theta_{0}) / #Delta#theta'
+    tick_length_pixels(pad1, xaxis, yaxis, row_pixels, 0)
+    yaxis.SetLabelOffset(999)
+    # make pull graph
+    pulls = Graph(
+        n_points, drawstyle='P', linewidth=2, markersize=1,
+        legendstyle='LP',
+        title="postfit value and #pm1#sigma uncertainty")
+    pulls_1sigma = pulls.Clone(
+        drawstyle='2', linewidth=0, markersize=0,
+        fillcolor='yellow', fillstyle='solid',
+        legendstyle='F',
+        title="#pm1#sigma prefit uncertainty")
+    prefit_graph = pulls_1sigma.Clone(
+        fillstyle='\\', color='blue', linewidth=2,
+        legendstyle='F',
+        title="#pm1#sigma prefit impact on #hat{#mu}")
+    postfit_graph = pulls_1sigma.Clone(
+        fillstyle='/', color='red', linewidth=2,
+        legendstyle='F',
+        title="#pm1#sigma postfit impact on #hat{#mu}")
+    for i, (np, impact, prefit, postfit) in enumerate(ranking):
+        info = data[np]
+        low, mid, high = info['np']
+        pulls_1sigma.SetPoint(i, mid, i)
+        pulls_1sigma.SetPointError(i, 1, 1, 0.5, 0.5)
+        err_up = high - mid
+        err_dn = mid - low
+        pulls.SetPoint(i, mid, i)
+        pulls.SetPointError(i, err_dn, err_up, 0, 0)
+        log.info('{0} pull: {1} < {2} < {3}'.format(np, err_dn, mid, err_up))
+        prefit_graph.SetPoint(i, 0, i)
+        postfit_graph.SetPoint(i, 0, i)
+        prefit_impact_low, prefit_impact_high = prefit
+        postfit_impact_low, postfit_impact_high = postfit
+        if '_' in np and (np.split('_')[0]=='gamma' or np.split('_')[1]=='norm'):
+            prefit_impact_low, prefit_impact_high = postfit
+            pulls_1sigma.SetPoint(i, mid-1, i)
+            pulls.SetPoint(i, mid-1, i)
+            pulls.SetPointError(i, 1, 1, 0, 0)
+        prefit_graph.SetPointError(i, prefit_impact_low * 4, prefit_impact_high * 4, 0.5, 0)
+        postfit_graph.SetPointError(i, postfit_impact_low * 4, postfit_impact_high * 4, 0, 0.5)
+    nuis_name = TLatex()
+    nuis_name.SetTextAlign(32)
+    nuis_name.SetTextSize(label_pixels)
+    pad1.cd()
+    # mu axis
+    mu_axis = TGaxis(-2, n_points + 1 - 0.5, 2, n_points + 1 - 0.5, -0.5, 0.5, 510, '-S')
+    mu_axis.SetTitle('#Delta#hat{#mu} / #hat{#mu}')
+    mu_axis.SetLabelFont(xaxis.GetLabelFont())
+    mu_axis.SetTitleFont(xaxis.GetTitleFont())
+    mu_axis.SetLabelSize(xaxis.GetLabelSize())
+    mu_axis.SetTitleSize(xaxis.GetTitleSize())
+    mu_axis.SetTitleOffset(xaxis.GetTitleOffset())
+    mu_axis.SetTickSize(row_pixels / float(c.height))
+    mu_axis.SetLabelOffset(-0.66 * row_pixels / float(c.height)
+                           + 20 / float(c.height))
+    mu_axis.Draw()
+    # draw 1sigma pull graph
+    pulls_1sigma.Draw('SAME')
+    # impact graphs
+    prefit_graph.Draw('SAME')
+    postfit_graph.Draw('SAME')
+    # draw guide lines
+    line.DrawLine(1, -0.5 - 1, 1, n_points + 1 - 0.5)
+    line.DrawLine(-1, -0.5 - 1, -1, n_points + 1 - 0.5)
+    line.DrawLine(0, -0.5 - 1, 0, n_points + 1 - 0.5)
+    for i in xrange(n_points):
+        solid_line.DrawLine(-2, i - 0.5, 2, i - 0.5)
+        np = ranking[i][0]
+        if 'gamma_stat' in np:
+            nuis_name.SetTextColor(ROOT.kRed)
+        elif 'norm' in np:
+            nuis_name.SetTextColor(ROOT.kBlue)
+        else:
+            nuis_name.SetTextColor(ROOT.kBlack)
+        nuis_name.DrawLatex(-2.1, i, print_np(ranking[i][0]))
+    solid_line.DrawLine(-2, i + 0.5, 2, i + 0.5)
+    pulls.Draw('SAME')
+    ATLAS_label(
+        0.03, 1. - pad1.GetTopMargin() / 2.,
+        text="Internal",
+        sqrts=None, pad=pad1, sep=0.1,
+        textsize=30)
+    mu_legend = Legend(
+        (prefit_graph, postfit_graph), pad=pad1,
+        entryheight=0.018)
+        # margin=0.1)
+    mu_legend.position_pixels = (left_pixels, c.height - 100, c.width, c.height - 20)
+    mu_legend.Draw()
+    theta_legend = Legend(
+        (pulls, pulls_1sigma), pad=pad1, rightmargin=0.7)
+    
+        # # x=0.05, y=0.80,
+        # entryheight=0.018,
+        # margin=0.1)
+    # theta_legend.position_pixels = (left_pixels, 20, c.width, 100)
+    theta_legend.position_pixels = (2, 20, c.width, 100)
+    theta_legend.Draw()
+    c.Modified()
+    c.Update()
+    c.SaveAs(os.path.join(outdir, '{0}.png'.format(name)))
+    c.SaveAs(os.path.join(outdir, '{0}.eps'.format(name)))
+
+
+if __name__ == '__main__':
+    from rootpy.extern.argparse import ArgumentParser
+
+    parser = ArgumentParser()
+    parser.add_argument('file')
+    parser.add_argument('--name', default='ranking')
+    parser.add_argument('--row-pixels', type=int, default=30)
+    parser.add_argument('--label-pixels', type=int, default=None)
+    parser.add_argument('--patterns', nargs='+', default=None)
+    parser.add_argument('--top', type=int, default=None)
+    args = parser.parse_args()
+
+    input = os.path.splitext(args.file)[0]
+    pulls = input + '_pulls.pickle'
+    plots = input + '_plots'
+
+    if not os.path.exists(plots):
+        mkdir_p(plots)
+
+    plot_ranking(
+        args.name, pulls, plots,
+        patterns=args.patterns,
+        top=args.top,
+        row_pixels=args.row_pixels,
+        label_pixels=args.label_pixels)
