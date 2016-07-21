@@ -7,6 +7,10 @@ import datetime
 import os
 import errno
 
+def get_setup(filename):
+    with open(filename) as f:
+        return ' && '.join([line.strip() for line
+                            in f.readlines()])
 
 def mkdir_p(path):
     """
