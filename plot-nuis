@@ -1,0 +1,111 @@
+#!/usr/bin/env python
+
+# python imports
+import pickle
+import os
+import logging
+
+# ROOT/rootpy imports
+from rootpy.plotting import Canvas, Legend, Graph, Hist, get_style, set_style
+from rootpy.utils.path import mkdir_p
+from rootpy.plotting.utils import draw
+from rootpy.plotting.style.atlas.labels import ATLAS_label
+from rootpy import ROOT
+from ROOT import TLine
+
+#local imports
+from hhstat.plotting import parse_name, get_category, get_data, print_np
+
+log = logging.getLogger(os.path.basename(__file__))
+
+# set the style
+style = get_style('ATLAS', shape='square')
+style.SetPadLeftMargin(0.16)
+style.SetTitleYOffset(1.4)
+style.SetTitleSize(20)
+set_style(style)
+
+if not os.getenv('MVA_NO_BATCH', False):
+    ROOT.gROOT.SetBatch(True)
+
+
+def get_pickle(ws_file):
+    dir_path = os.path.dirname(ws_file)
+    pickle_name = os.path.basename(ws_file).replace('.root', '_nuispars_scan.pickle')
+    return os.path.join(dir_path, pickle_name)
+
+
+def plot_nuis(name, graphs, outdir):
+    c = Canvas()
+    xaxis, yaxis = c.axes(xlimits=(-3, 3), ylimits=(-1, 10))
+    # draw guide lines
+    line = TLine()
+    line.SetLineStyle(7)
+    line.SetLineWidth(2)
+    line.DrawLine(-3, 0, 3, 0)
+    line.DrawLine(-3, 1, 3, 1)
+    draw(graphs, pad=c, snap=False, ypadding=0, same=True,
+         xaxis=xaxis, yaxis=yaxis,
+         xtitle=print_np(name), ytitle='2#Delta[-log(L)]',
+         xlimits=(-3, 3), ylimits=(-1, 10))
+    for graph in graphs:
+        graph.legendstyle = 'L'
+    # leg = Legend(graphs, x=0.30, y=0.01, textsize=15)
+    # leg.Draw()
+    ATLAS_label(0.68, 0.88, text="Internal", sqrts=None, pad=c, sep=0.12)
+    c.SaveAs(os.path.join(outdir, '{0}.png'.format(name)))
+    c.SaveAs(os.path.join(outdir, '{0}.eps'.format(name)))
+
+
+def make_graph(values, nominal, max_value=8, **kwargs):
+    graph = Graph(len(values), **kwargs)    
+    i = 0
+    for x, y in values:
+        value = 2 * (y - nominal)
+        # nan?
+        if value != value:
+            continue
+        if value > max_value:
+            continue
+        graph[i] = (x, value)
+        i += 1
+    graph.num_points = i
+    return graph
+
+
+if __name__ == '__main__':
+    from rootpy.extern.argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('path')
+
+    args = parser.parse_args()
+    
+    # Step1: Retrieve NP scans of the combined WS
+    graphs = {}
+
+    combined_np_path = get_pickle(args.path)
+    print combined_np_path
+    if not os.path.exists(combined_np_path):
+        raise RuntimeError('Need the combineds WS scans to run !')
+
+    data_comb = get_data(combined_np_path)
+    nominal_comb = data_comb['NOMINAL']
+    for nuis, values in data_comb.items():
+        if nuis == 'NOMINAL':
+            continue
+        graphs[nuis] = []
+        graphs[nuis].append(make_graph(
+                values, nominal_comb, drawstyle='L', linewidth=3, 
+                name='hh_combination_{0}'.format(nuis),
+                title='Combined'))
+
+    # Step 3: Draw the NPS scans
+    dir_name = os.path.dirname(args.path)
+    plots = os.path.join(dir_name,
+                         'nuisances_scans')
+
+    if not os.path.exists(plots):
+        mkdir_p(plots)
+    for nuis, graphs_nuis in graphs.items():
+        log.info(graphs_nuis)
+        plot_nuis(nuis, graphs_nuis, plots)
