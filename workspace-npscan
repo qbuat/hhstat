@@ -3,6 +3,7 @@
 from multiprocessing import Process
 import pickle
 import os
+import logging
 
 # ---> rootpy imports
 from rootpy.io import root_open
@@ -14,18 +15,29 @@ from rootpy import asrootpy
 # ---> local imports
 from hhstat.parallel import run_pool
 from hhstat.nuisance import NuisParScan
-import logging;
+
 log = logging.getLogger(os.path.basename(__file__))
 
-NP_TESTED_VALS = [0.2*i for i in range(-25,26)] #range(-5,6)
+NP_TESTED_VALS = [0.2 * i for i in range(-25, 26)] #range(-5,6)
 
-def scan_np(file_name, ws_name, np_name, pickle_name, n_jobs):
+def scan_np(
+    file_name, ws_name, 
+    np_name, pickle_name, n_jobs):
+    '''
+    Scan a given nuisance parameter
+    Parameters
+    ----------
+    # file_name: name of the rootfile, str
+    # ws_name: name of workspace, str
+    # np_name: name of the nuisance parameter, str
+    # n_jobs: number of jobs run in //, int
+    '''
     with root_open(file_name) as file:
         ws = file[ws_name]
         roo_min = asrootpy(ws).fit()
         fitres = roo_min.save()
         minNLL_hat = fitres.minNll()
-        log.info( 'minimized NLL: %f'%minNLL_hat)
+        log.info('minimized NLL: %f' % minNLL_hat)
         mc = ws.obj('ModelConfig')
         obsData = ws.data('obsData')
         ws.saveSnapshot('StartingPoint', mc.GetPdf().getParameters(obsData))
@@ -33,9 +45,10 @@ def scan_np(file_name, ws_name, np_name, pickle_name, n_jobs):
         # define the workers
         workers = []
         for val in NP_TESTED_VALS:
-            workers.append(NuisParScan(pickle_name, ws, mc,
-                                       np_name, val,
-                                       ws_snapshot='StartingPoint'))
+            workers.append(NuisParScan(
+                    pickle_name, ws, mc,
+                    np_name, val,
+                    ws_snapshot='StartingPoint'))
 
         # run the pool
         run_pool(workers, n_jobs=n_jobs)

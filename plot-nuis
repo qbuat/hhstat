@@ -6,12 +6,11 @@ import os
 import logging
 
 # ROOT/rootpy imports
-from rootpy.plotting import Canvas, Legend, Graph, Hist, get_style, set_style
+from rootpy.plotting import Canvas Graph, get_style, set_style
 from rootpy.utils.path import mkdir_p
 from rootpy.plotting.utils import draw
 from rootpy.plotting.style.atlas.labels import ATLAS_label
-from rootpy import ROOT
-from ROOT import TLine
+import ROOT
 
 #local imports
 from hhstat.plotting import parse_name, get_category, get_data, print_np
@@ -31,7 +30,8 @@ if not os.getenv('MVA_NO_BATCH', False):
 
 def get_pickle(ws_file):
     dir_path = os.path.dirname(ws_file)
-    pickle_name = os.path.basename(ws_file).replace('.root', '_nuispars_scan.pickle')
+    pickle_name = os.path.basename(
+        ws_file).replace('.root', '_nuispars_scan.pickle')
     return os.path.join(dir_path, pickle_name)
 
 
@@ -39,7 +39,7 @@ def plot_nuis(name, graphs, outdir):
     c = Canvas()
     xaxis, yaxis = c.axes(xlimits=(-3, 3), ylimits=(-1, 10))
     # draw guide lines
-    line = TLine()
+    line = ROOT.TLine()
     line.SetLineStyle(7)
     line.SetLineWidth(2)
     line.DrawLine(-3, 0, 3, 0)
@@ -50,9 +50,9 @@ def plot_nuis(name, graphs, outdir):
          xlimits=(-3, 3), ylimits=(-1, 10))
     for graph in graphs:
         graph.legendstyle = 'L'
-    # leg = Legend(graphs, x=0.30, y=0.01, textsize=15)
-    # leg.Draw()
-    ATLAS_label(0.68, 0.88, text="Internal", sqrts=None, pad=c, sep=0.12)
+    ATLAS_label(
+        0.68, 0.88, text="Internal", 
+        sqrts=None, pad=c, sep=0.12)
     c.SaveAs(os.path.join(outdir, '{0}.png'.format(name)))
     c.SaveAs(os.path.join(outdir, '{0}.eps'.format(name)))
 
@@ -95,17 +95,19 @@ if __name__ == '__main__':
             continue
         graphs[nuis] = []
         graphs[nuis].append(make_graph(
-                values, nominal_comb, drawstyle='L', linewidth=3, 
+                values, nominal_comb, 
+                drawstyle='L', linewidth=3, 
                 name='hh_combination_{0}'.format(nuis),
                 title='Combined'))
 
     # Step 3: Draw the NPS scans
     dir_name = os.path.dirname(args.path)
-    plots = os.path.join(dir_name,
-                         'nuisances_scans')
+    plots = os.path.join(
+        dir_name, 'nuisances_scans')
 
     if not os.path.exists(plots):
         mkdir_p(plots)
+
     for nuis, graphs_nuis in graphs.items():
         log.info(graphs_nuis)
         plot_nuis(nuis, graphs_nuis, plots)
