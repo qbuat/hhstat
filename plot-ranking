@@ -179,7 +179,7 @@ def plot_ranking(name, file, outdir,
         else:
             nuis_name.SetTextColor(ROOT.kBlack)
         nuis_name.DrawLatex(-2.1, i, print_np(ranking[i][0]))
-    solid_line.DrawLine(-2, i + 0.5, 2, i + 0.5)
+        solid_line.DrawLine(-2, i + 0.5, 2, i + 0.5)
     pulls.Draw('SAME')
     ATLAS_label(
         0.03, 1. - pad1.GetTopMargin() / 2.,
