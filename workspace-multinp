@@ -48,8 +48,10 @@ if __name__ == '__main__':
 
     # ------------------------------------
     if 'scans_fit' in args.actions:
+        setup_file = 'setup.{0}.sfu.txt'.format(
+            os.getenv('USER'))
         setup = get_setup(os.path.join(
-                os.path.dirname(__file__), 'cache', 'setup.quentin.sfu.txt'))
+                os.path.dirname(__file__), 'cache', setup_file))
 
         log_path = os.getenv('PBS_LOG', None)
         for par in nuispar_list:
